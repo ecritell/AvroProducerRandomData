@@ -1,3 +1,4 @@
+import java.util
 import java.util.concurrent.Future
 
 import org.apache.kafka.clients.producer._
@@ -10,7 +11,7 @@ case class CustomProducer(brokerList: String, schemaRegistry: String,
                           keySerializer: String, valueSerializer: String) {
 
   val SCHEMA_REGISTRY = "schema.registry.url"
-  val producerProps = {
+  val producerProps: util.Map[String, Object] = {
     Map[String, Object](
       ProducerConfig.BOOTSTRAP_SERVERS_CONFIG -> brokerList,
       ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG -> keySerializer,
