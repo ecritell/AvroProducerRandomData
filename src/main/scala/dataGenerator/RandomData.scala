@@ -1,3 +1,5 @@
+package dataGenerator
+
 import java.nio.ByteBuffer
 import java.util
 
@@ -7,17 +9,16 @@ import org.apache.avro.generic.GenericData
 import org.apache.avro.util.Utf8
 
 import scala.collection.JavaConversions._
-
-
 import scala.util.Random
 
-class RandomData(schema: Schema, countRecord: Int, seed: Long) extends Iterable[Any] {
+class RandomData(schema: Schema, countRecord: Int, seed: Long,
+                 fieldsWithCustomValue: Map[String, List[String]]) extends Iterable[Any] {
 
   /*
    * A secondary constructor.
    */
-  def this(schema: Schema, countRecord: Int) {
-    this(schema, countRecord, System.currentTimeMillis())
+  def this(schema: Schema, countRecord: Int, fieldsWithCustomValue: Map[String, List[String]]) {
+    this(schema, countRecord, System.currentTimeMillis(), fieldsWithCustomValue)
   }
 
   override def iterator: Iterator[Any] = {
@@ -31,7 +32,11 @@ class RandomData(schema: Schema, countRecord: Int, seed: Long) extends Iterable[
       case Type.RECORD =>
         val record = new GenericData.Record(schema)
         for (entry <- schema.getFields.toList) {
-          record.put(entry.name, generate(entry.schema, random, d + 1))
+          if(fieldsWithCustomValue.contains(entry.name)){
+            record.put(entry.name, randomCustomValue(random, entry.name))
+          } else {
+            record.put(entry.name, generate(entry.schema, random, d + 1))
+          }
         }
         record
       case Type.ENUM =>
@@ -79,6 +84,13 @@ class RandomData(schema: Schema, countRecord: Int, seed: Long) extends Iterable[
         throw new RuntimeException("Unknown type: " + schema)
     }
   }
+
+  private def randomCustomValue(random: Random, key: String) = {
+    val value = fieldsWithCustomValue(key)
+
+    value(random.nextInt(value.size))
+  }
+
   private def randomUtf8(random: Random, maxLenght: Int): Utf8 = {
     val rand = StringBuilder.newBuilder
     for (i <- 0 until maxLenght){

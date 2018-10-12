@@ -1,3 +1,5 @@
+package schemaRegistry
+
 import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient
 import org.apache.avro.Schema
 import org.slf4j.LoggerFactory

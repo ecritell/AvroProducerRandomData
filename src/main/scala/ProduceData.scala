@@ -1,5 +1,13 @@
-import com.typesafe.config.{Config, ConfigFactory}
+import conf.Config
+import dataGenerator.RandomDataProducer
+import org.json4s._
+import org.json4s.jackson.JsonMethods._
+import enums.Serializer
+import kafka.producers.CustomProducer
 import org.slf4j.LoggerFactory
+import pureconfig.error.ConfigReaderFailures
+
+import scala.util.Try
 
 object ProduceData {
   private val logger = LoggerFactory.getLogger(ProduceData.getClass)
@@ -10,28 +18,53 @@ object ProduceData {
   )
 
   def main(args: Array[String]): Unit = {
-    val config: Config = ConfigFactory.load().getConfig("main")
 
-    val brokers = config.getString("brokersList")
-    val schemaRegistryUrl = config.getString("schemaRegistryUrl")
-    val schemaName = config.getString("schemaName")
-    val topicName = config.getString("topicName")
-    val numberRecord = config.getInt("numberRecord")
-    val hasKey = config.getBoolean("hasKey")
-    val serializerType = config.getEnum[Serializer](classOf[Serializer], "serializerType")
+    implicit val formats = org.json4s.DefaultFormats
 
-    CustomProducer.brokerList = brokers
-    CustomProducer.schemaRegistry = schemaRegistryUrl
-    CustomProducer.keySerializer = CHOOSE_SERIALIZER(serializerType)
-    CustomProducer.valueSerializer = CHOOSE_SERIALIZER(serializerType)
+    val config: Either[ConfigReaderFailures, Config] = pureconfig.loadConfig[Config]
+
+    if (config.isLeft) {
+      logger.error(s"Error during loaded config: ${config.toString}")
+
+      throw new IllegalArgumentException()
+    }
+
+    val configLoaded = config.right.get
+
+    var fieldsWithCustomValue: Try[Map[String, List[String]]] = Try(parse(configLoaded.fieldsWithCustomValue)
+      .extract[Map[String, List[String]]])
+
+    if(fieldsWithCustomValue.isFailure) {
+
+      throw new IllegalArgumentException("Error during loaded config", fieldsWithCustomValue.failed.get)
+    }
+
+    CustomProducer.brokerList = configLoaded.brokersList
+    CustomProducer.schemaRegistry = configLoaded.schemaRegistryUrl
+    CustomProducer.keySerializer = CHOOSE_SERIALIZER(configLoaded.serializerType)
+    CustomProducer.valueSerializer = CHOOSE_SERIALIZER(configLoaded.serializerType)
+
+
+    val randomDataProducer = new RandomDataProducer(configLoaded.schemaRegistryUrl, configLoaded.schemaName,
+      configLoaded.numberRecord, configLoaded.hasKey, fieldsWithCustomValue.get,
+      configLoaded.serializerType, configLoaded.topicName)
 
     logger.info("PRODUCER STARTED")
 
-    val records: Iterator[Any] = RandomDataProducer.getRecordsToWrite(schemaRegistryUrl, schemaName, numberRecord, hasKey)
+    val records: Iterator[Any] = randomDataProducer.getRecordsToWrite
 
-    RandomDataProducer.produceMessages(CustomProducer.instance, serializerType, records, topicName)
+    try {
+
+      randomDataProducer.produceMessages(CustomProducer.instance, records)
+
+    }finally {
+      CustomProducer.instance.producer.flush()
+      CustomProducer.instance.producer.close()
+    }
 
     logger.info("PRODUCER FINISHED")
+
+
   }
 
 }

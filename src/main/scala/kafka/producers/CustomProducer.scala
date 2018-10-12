@@ -1,5 +1,4 @@
-import java.util
-import java.util.concurrent.Future
+package kafka.producers
 
 import org.apache.kafka.clients.producer._
 import org.slf4j.LoggerFactory
@@ -21,19 +20,19 @@ case class CustomProducer(brokerList: String, schemaRegistry: String,
       ProducerConfig.BATCH_SIZE_CONFIG -> "16384",
       ProducerConfig.LINGER_MS_CONFIG -> "1",
       ProducerConfig.BUFFER_MEMORY_CONFIG -> "33554432",
-      ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG -> "true",
+      //ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG -> "true",
       SCHEMA_REGISTRY -> schemaRegistry
     ).asJava
   }
 
   val producer = new KafkaProducer[Any, Any](producerProps)
 
-  def send(topic: String, key: Any, value: Any): Future[RecordMetadata] = {
-    producer.send(new ProducerRecord[Any, Any](topic, key, value), new CustomCallback())
+  def send(topic: String, key: Any, value: Any) = {
+    producer.send(new ProducerRecord[Any, Any](topic, key, value))
   }
 
-  def send(topic: String, value: Any): Future[RecordMetadata] = {
-    producer.send(new ProducerRecord(topic, value), new CustomCallback())
+  def send(topic: String, value: Any) = {
+    producer.send(new ProducerRecord(topic, value))
   }
 
   class CustomCallback extends Callback {

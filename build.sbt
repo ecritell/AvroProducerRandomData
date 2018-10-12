@@ -1,6 +1,4 @@
-import sbt.util
-
-name := "AvroProducerRandomData"
+name := "RandomDataProducer"
 
 lazy val commonSettings = Seq(
   version := "0.1-SNAPSHOT",
@@ -28,17 +26,9 @@ lazy val root = (project in file("."))
   .enablePlugins(DockerPlugin, DockerComposePlugin)
   .settings(commonSettings: _*)
   .settings(
-    assemblyJarName in assembly := "AvroProducerRandomData.jar",
+    assemblyJarName in assembly := s"RandomDataProducer-assembly-0.1-SNAPSHOT.jar",
     mainClass in assembly := Some("ProduceData"),
-    libraryDependencies ++= Seq(
-      "org.apache.kafka" %% "kafka" % "1.0.0",
-      "io.confluent" % "kafka-avro-serializer" % "4.0.0",
-      "org.apache.avro" % "avro" % "1.8.2",
-      "com.typesafe" % "config" % "1.3.3",
-
-      //TEST
-      "org.scalatest" %% "scalatest" % "3.0.5" % "test"
-    ),
+    Dependencies.randomDataProducer,
     assemblyMergeStrategy in assembly := {
       case PathList("META-INF", "MANIFEST.MF") => MergeStrategy.discard
       case _ => MergeStrategy.first

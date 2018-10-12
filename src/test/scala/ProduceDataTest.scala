@@ -1,7 +1,10 @@
 import java.util
 
 import ProduceData.CHOOSE_SERIALIZER
-import org.apache.kafka.clients.consumer.ConsumerRecords
+import dataGenerator.RandomDataProducer
+import enums.Serializer
+import kafka.producers.CustomProducer
+import org.apache.kafka.clients.consumer.{ConsumerRecord, ConsumerRecords}
 import org.scalatest.BeforeAndAfterAll
 
 import sys.process._
@@ -17,6 +20,12 @@ class ProduceDataTest extends UnitSpec with BeforeAndAfterAll {
   val brokers: String = "http://" + System.getProperty("broker:9093")
   val schemaRegistryUrl: String = "http://" + System.getProperty("schema_registry:8081")
   val schemaName: String = "gb.portability.activity"
+
+  val fieldsWithCustomValue: Map[String, List[String]] = Map("providerTerritory" -> List("gb", "ie", "at", "es", "it"),
+    "provider" -> List("nowtv", "sky"),
+    "proposition" -> List("sky", "skyplus", "skyq"))
+
+  val consumerPollTimeout = 5000
 
   val schemaValue: String = scala.io.Source.fromURL(getClass.getResource("/AvroSchemaValue")).getLines.mkString
   val schemaKey: String = scala.io.Source.fromURL(getClass.getResource("/AvroSchemaKey")).getLines.mkString
@@ -43,70 +52,91 @@ class ProduceDataTest extends UnitSpec with BeforeAndAfterAll {
     val keyDeserializer = CHOOSE_DESERIALIZER(serializerType)
     val valueDeserializer = CHOOSE_DESERIALIZER(serializerType)
 
+
     val producer = CustomProducer(brokers, schemaRegistryUrl, CHOOSE_SERIALIZER(serializerType), CHOOSE_SERIALIZER(serializerType))
 
-    val records = RandomDataProducer.getRecordsToWrite(schemaRegistryUrl, schemaName, numberRecord, hasKey)
+    val randomDataProducer = new RandomDataProducer(schemaRegistryUrl, schemaName,
+      numberRecord, hasKey, fieldsWithCustomValue, serializerType, topicName)
 
-    assert(records.size == numberRecord)
+    val records = randomDataProducer.getRecordsToWrite
 
-    RandomDataProducer.produceMessages(producer, serializerType, records, topicName)
+    assert (records.size == numberRecord)
+
+    randomDataProducer.produceMessages(producer, records)
     producer.producer.close()
 
     val consumer = CustomConsumer(brokers, schemaRegistryUrl, keyDeserializer, valueDeserializer).consumer
 
     consumer.subscribe(util.Collections.singletonList(topicName))
 
-    var recordsPolled: ConsumerRecords[Any, Any] = consumer.poll(100)
-    var recordsPolledCount = recordsPolled.count()
+    /*
+    while (true) {
+      val records = consumer.poll(100)
 
-    while(recordsPolledCount == 0) {
-      recordsPolled =  consumer.poll(100)
-      recordsPolledCount = recordsPolled.count()
+      for (record: ConsumerRecord[Any, Any] <- records.asScala) {
+        println(record.value())
+
+      }
     }
+    */
+
+
+    val recordsPolled: ConsumerRecords[Any, Any] = consumer.poll(consumerPollTimeout)
+
+    recordsPolled.iterator().hasNext shouldBe true
+
+
+    val record = recordsPolled.iterator().next()
+
+    record.key() shouldBe records.toList.head.asInstanceOf[(Any, Any)]._1
+    record.value() shouldBe records.toList.head.asInstanceOf[(Any, Any)]._2
+
+
     consumer.commitSync()
+    consumer.close()
 
-    assert(recordsPolledCount == numberRecord)
-
-    assert(recordsPolled.asScala.head.key() == records.toList.head.asInstanceOf[(Any, Any)]._1)
-    assert(recordsPolled.asScala.head.value() == records.toList.head.asInstanceOf[(Any, Any)]._2)
   }
+
 
   "Produce avro data type without key" should "write record in kafka topic" in {
 
     val topicName = "gb.portability.activity.avro"
     val numberRecord = 1
     val hasKey = "false".toBoolean
-    val serializerType = Serializer.AVRO
+    val serializerType = enums.Serializer.AVRO
 
     val keyDeserializer = CHOOSE_DESERIALIZER(serializerType)
     val valueDeserializer = CHOOSE_DESERIALIZER(serializerType)
 
-    val producer = CustomProducer(brokers, schemaRegistryUrl, CHOOSE_SERIALIZER(serializerType), CHOOSE_SERIALIZER(serializerType))
+    val producer = kafka.producers.CustomProducer(brokers, schemaRegistryUrl, CHOOSE_SERIALIZER(serializerType), CHOOSE_SERIALIZER(serializerType))
 
-    val records = RandomDataProducer.getRecordsToWrite(schemaRegistryUrl, schemaName, numberRecord, hasKey)
+    val randomDataProducer = new RandomDataProducer(schemaRegistryUrl, schemaName,
+      numberRecord, hasKey, fieldsWithCustomValue, serializerType, topicName)
 
-    assert(records.size == numberRecord)
+    val records = randomDataProducer.getRecordsToWrite
 
-    RandomDataProducer.produceMessages(producer, serializerType, records, topicName)
+    assert (records.size == numberRecord)
+
+    randomDataProducer.produceMessages(producer, records)
     producer.producer.close()
 
     val consumer = CustomConsumer(brokers, schemaRegistryUrl, keyDeserializer, valueDeserializer).consumer
 
     consumer.subscribe(util.Collections.singletonList(topicName))
 
-    var recordsPolled: ConsumerRecords[Any, Any] = consumer.poll(100)
-    var recordsPolledCount = recordsPolled.count()
+    val recordsPolled: ConsumerRecords[Any, Any] = consumer.poll(consumerPollTimeout)
 
-    while(recordsPolledCount == 0) {
-      recordsPolled =  consumer.poll(100)
-      recordsPolledCount = recordsPolled.count()
-    }
+    recordsPolled.iterator().hasNext shouldBe true
+
+
+    val record = recordsPolled.iterator().next()
+
+    assert(record.key() == null)
+    assert(record.value() == records.toList.head)
+
+
     consumer.commitSync()
-
-    assert(recordsPolledCount == numberRecord)
-
-    assert(recordsPolled.asScala.head.key() == null)
-    assert(recordsPolled.asScala.head.value() == records.toList.head)
+    consumer.close()
   }
 
   "Produce string data type without key" should "write record in kafka topic" in {
@@ -114,37 +144,36 @@ class ProduceDataTest extends UnitSpec with BeforeAndAfterAll {
     val topicName = "gb.portability.activity"
     val numberRecord = 1
     val hasKey = "false".toBoolean
-    val serializerType = Serializer.STRING
+    val serializerType = enums.Serializer.STRING
 
     val keyDeserializer = CHOOSE_DESERIALIZER(serializerType)
     val valueDeserializer = CHOOSE_DESERIALIZER(serializerType)
 
-    val producer = CustomProducer(brokers, schemaRegistryUrl, CHOOSE_SERIALIZER(serializerType), CHOOSE_SERIALIZER(serializerType))
+    val producer = kafka.producers.CustomProducer(brokers, schemaRegistryUrl, CHOOSE_SERIALIZER(serializerType), CHOOSE_SERIALIZER(serializerType))
 
-    val records = RandomDataProducer.getRecordsToWrite(schemaRegistryUrl, schemaName, numberRecord, hasKey)
+    val randomDataProducer = new RandomDataProducer(schemaRegistryUrl, schemaName,
+      numberRecord, hasKey, fieldsWithCustomValue, serializerType, topicName)
 
-    assert(records.size == numberRecord)
+    val records = randomDataProducer.getRecordsToWrite
 
-    RandomDataProducer.produceMessages(producer, serializerType, records, topicName)
+    assert (records.size == numberRecord)
+
+    randomDataProducer.produceMessages(producer, records)
     producer.producer.close()
 
     val consumer = CustomConsumer(brokers, schemaRegistryUrl, keyDeserializer, valueDeserializer).consumer
 
     consumer.subscribe(util.Collections.singletonList(topicName))
 
-    var recordsPolled: ConsumerRecords[Any, Any] = consumer.poll(100)
-    var recordsPolledCount = recordsPolled.count()
+    val recordsPolled: ConsumerRecords[Any, Any] = consumer.poll(consumerPollTimeout)
 
-    while(recordsPolledCount == 0) {
-      recordsPolled =  consumer.poll(100)
-      recordsPolledCount = recordsPolled.count()
-    }
-    consumer.commitSync()
-
-    assert(recordsPolledCount == numberRecord)
+    recordsPolled.iterator().hasNext shouldBe true
 
     assert(recordsPolled.asScala.head.key() == null)
     assert(recordsPolled.asScala.head.value() == records.toList.head.toString)
+
+    consumer.commitSync()
+    consumer.close()
   }
 
   "Produce string data type with key" should "write record in kafka topic" in {
@@ -152,36 +181,36 @@ class ProduceDataTest extends UnitSpec with BeforeAndAfterAll {
     val topicName = "gb.portability.activity.avro"
     val numberRecord = 1
     val hasKey = "true".toBoolean
-    val serializerType = Serializer.STRING
+    val serializerType = enums.Serializer.STRING
 
     val keyDeserializer = CHOOSE_DESERIALIZER(serializerType)
     val valueDeserializer = CHOOSE_DESERIALIZER(serializerType)
 
-    val producer = CustomProducer(brokers, schemaRegistryUrl, CHOOSE_SERIALIZER(serializerType), CHOOSE_SERIALIZER(serializerType))
+    val producer = kafka.producers.CustomProducer(brokers, schemaRegistryUrl, CHOOSE_SERIALIZER(serializerType), CHOOSE_SERIALIZER(serializerType))
 
-    val records = RandomDataProducer.getRecordsToWrite(schemaRegistryUrl, schemaName, numberRecord, hasKey)
+    val randomDataProducer = new RandomDataProducer(schemaRegistryUrl, schemaName,
+      numberRecord, hasKey, fieldsWithCustomValue, serializerType, topicName)
 
-    assert(records.size == numberRecord)
+    val records = randomDataProducer.getRecordsToWrite
 
-    RandomDataProducer.produceMessages(producer, serializerType, records, topicName)
+    assert (records.size == numberRecord)
+
+    randomDataProducer.produceMessages(producer, records)
     producer.producer.close()
 
     val consumer = CustomConsumer(brokers, schemaRegistryUrl, keyDeserializer, valueDeserializer).consumer
 
     consumer.subscribe(util.Collections.singletonList(topicName))
 
-    var recordsPolled: ConsumerRecords[Any, Any] = consumer.poll(100)
-    var recordsPolledCount = recordsPolled.count()
+    val recordsPolled: ConsumerRecords[Any, Any] = consumer.poll(consumerPollTimeout)
 
-    while(recordsPolledCount == 0) {
-      recordsPolled =  consumer.poll(100)
-      recordsPolledCount = recordsPolled.count()
-    }
-    consumer.commitSync()
-
-    assert(recordsPolledCount == numberRecord)
+    recordsPolled.iterator().hasNext shouldBe true
 
     assert(recordsPolled.asScala.head.key() == records.toList.head.asInstanceOf[(Any, Any)]._1.toString)
     assert(recordsPolled.asScala.head.value() == records.toList.head.asInstanceOf[(Any, Any)]._2.toString)
+
+    consumer.commitSync()
+    consumer.close()
   }
+
 }
